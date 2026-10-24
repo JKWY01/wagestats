@@ -1,0 +1,21 @@
+@import "tailwindcss";
+
+/* 站点皮肤:石板蓝数据站基调(与 AnswerToday 的品牌绿刻意区分——站群换皮纪律) */
+:root {
+  --background: #f7f8fa;
+  --foreground: #111827;
+  --brand: #3748c4;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-ink: var(--foreground);
+  --color-brand: var(--brand);
+  --font-sans: ui-sans-serif, -apple-system, "SF Pro Text", "Segoe UI", Helvetica, Arial, sans-serif;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
