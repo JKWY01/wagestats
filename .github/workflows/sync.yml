@@ -1,0 +1,61 @@
+name: BLS data sync
+
+# BLS OES 每年发一版(May 参考期,次年 3-4 月发布),周频检查足够:
+# 数据无变化不提交(幂等),有变化 → push → Vercel 自动部署。
+# 首次引导:手动 workflow_dispatch 触发一次,把全量数据落进仓库。
+on:
+  schedule:
+    - cron: '30 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: site-ops
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Sync BLS data
+        run: |
+          npm install --no-audit --no-fund xlsx
+          node scripts/sync-bls.mjs
+
+      - name: Commit and push if changed
+        run: |
+          git config user.name "JKWY01"
+          git config user.email "71512658+JKWY01@users.noreply.github.com"
+          git add data/bls-oes.json
+          if git diff --cached --quiet; then
+            echo "no data change, nothing to push"
+            exit 0
+          fi
+          git commit -m "sync: BLS OES data [skip ci]"
+          git push
+
+      - name: Alert on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          OPEN=$(gh issue list --search "🚨 in:title" --state open --json number --jq length)
+          if [ "${OPEN:-0}" = "0" ]; then
+            gh issue create \
+              --title "🚨 BLS sync failed — $(date -u '+%F %T') UTC" \
+              --body "自动告警:BLS 数据同步失败,站点放养中需要人工查看。
+          运行记录:${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          修复后请关闭本 issue。连续失败时本告警不会重复开(去重逻辑见 workflow)。" || echo "issue create failed (non-fatal)"
+          else
+            echo "alert issue already open, skip duplicate"
+          fi
