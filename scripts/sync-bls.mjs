@@ -16,9 +16,12 @@
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
+import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
-import * as XLSX from 'xlsx'
+
+// xlsx 是 CJS 包,node ESM 下命名空间导入拿不到具名导出,走 createRequire 最稳
+const XLSX = createRequire(import.meta.url)('xlsx')
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const DATA_PATH = join(ROOT, 'data', 'bls-oes.json')
