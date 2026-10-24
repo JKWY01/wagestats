@@ -24,47 +24,52 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const DATA_PATH = join(ROOT, 'data', 'bls-oes.json')
 const TMP = join(ROOT, '.bls-tmp')
 
-/** May 2025 发布的候选 URL(按官方命名惯例排列;可用 BLS_ZIP_URL 覆盖)。 */
-const ZIP_CANDIDATES = [
-  process.env.BLS_ZIP_URL,
-  'https://www.bls.gov/oes/special-requests/oesm25state.zip',
-  'https://www.bls.gov/oes/special-requests/oesm25st.zip',
-].filter(Boolean)
+/** 下载候选(直连优先,Wayback 镜像兜底——BLS 对大量非浏览器出口一律 403)。
+ *  Wayback 的 id_ 后缀返回原始字节(无存档横幅),数据本体与 BLS 完全一致,来源如实标注。 */
+const RELEASES = [
+  { release: 'May 2025', file: 'oesm25state.zip' },
+  { release: 'May 2024', file: 'oesm24state.zip' },
+]
+
+function zipCandidates() {
+  const out = []
+  if (process.env.BLS_ZIP_URL) out.push({ url: process.env.BLS_ZIP_URL, release: 'custom' })
+  for (const { release, file } of RELEASES) {
+    out.push({ url: `https://www.bls.gov/oes/special-requests/${file}`, release })
+    out.push({ url: `https://web.archive.org/web/2026id_/https://www.bls.gov/oes/special-requests/${file}`, release })
+  }
+  return out
+}
 
 const UA =
   'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
 
-function etTodayISO() {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date())
-}
-
 async function downloadZip() {
   const zipPath = join(TMP, 'oes-state.zip')
-  for (const url of ZIP_CANDIDATES) {
+  for (const cand of zipCandidates()) {
     try {
-      const res = await fetch(url, {
+      const res = await fetch(cand.url, {
         headers: { 'User-Agent': UA, Accept: '*/*', Referer: 'https://www.bls.gov/oes/' },
         redirect: 'follow',
-        signal: AbortSignal.timeout(120_000),
+        signal: AbortSignal.timeout(180_000),
       })
       if (!res.ok) {
-        console.log(`[sync-bls] ${url} → HTTP ${res.status}`)
+        console.log(`[sync-bls] ${cand.url} → HTTP ${res.status}`)
         continue
       }
       const buf = Buffer.from(await res.arrayBuffer())
       if (buf.length < 100_000 || !buf.subarray(0, 2).equals(Buffer.from('PK'))) {
-        console.log(`[sync-bls] ${url} → not a zip (${buf.length}B)`)
+        console.log(`[sync-bls] ${cand.url} → not a zip (${buf.length}B)`)
         continue
       }
-      const { writeFileSync: wf } = await import('node:fs')
-      wf(zipPath, buf)
-      console.log(`[sync-bls] downloaded ${url} (${(buf.length / 1e6).toFixed(1)}MB)`)
-      return zipPath
+      writeFileSync(zipPath, buf)
+      console.log(`[sync-bls] downloaded ${cand.url} (${(buf.length / 1e6).toFixed(1)}MB, ${cand.release})`)
+      return { zipPath, release: cand.release }
     } catch (err) {
-      console.log(`[sync-bls] ${url} → ${err.message}`)
+      console.log(`[sync-bls] ${cand.url} → ${err.message}`)
     }
   }
-  throw new Error('all BLS zip candidates failed (if local: BLS blocks many IPs — run in CI)')
+  throw new Error('all BLS zip candidates failed (direct + Wayback)')
 }
 
 /** '#'/'*' 等 BLS 标记 → null;数字字段转 number;纯文本字段留字符串。 */
@@ -89,8 +94,8 @@ function slugify(text) {
 function main() {
   mkdirSync(TMP, { recursive: true })
   downloadZip()
-    .then((zp) => {
-      execFileSync('unzip', ['-o', zp, '-d', TMP], { stdio: 'pipe' })
+    .then(({ zipPath, release }) => {
+      execFileSync('unzip', ['-o', zipPath, '-d', TMP], { stdio: 'pipe' })
       const files = execFileSync('find', [TMP, '-name', '*.xlsx'], { encoding: 'utf8' })
         .split('\n')
         .map((f) => f.trim())
@@ -157,7 +162,7 @@ function main() {
       const payload = {
         meta: {
           source: 'U.S. Bureau of Labor Statistics — Occupational Employment and Wage Statistics',
-          release: 'May 2025',
+          release,
           fetched_at: new Date().toISOString(),
           occupations: occCount,
           states: states.length,
