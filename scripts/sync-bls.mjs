@@ -96,11 +96,15 @@ function main() {
   downloadZip()
     .then(({ zipPath, release }) => {
       execFileSync('unzip', ['-o', zipPath, '-d', TMP], { stdio: 'pipe' })
-      const files = execFileSync('find', [TMP, '-name', '*.xlsx'], { encoding: 'utf8' })
+      const files = execFileSync('find', [TMP, '-type', 'f'], { encoding: 'utf8' })
         .split('\n')
         .map((f) => f.trim())
         .filter(Boolean)
-      if (files.length < 40) throw new Error(`expected 50+ state xlsx, got ${files.length}`)
+      const xlsxFiles = files.filter((f) => /\.xlsx$/i.test(f))
+      if (xlsxFiles.length < 40) {
+        const listing = files.slice(0, 30).join('\n')
+        throw new Error(`expected 50+ state xlsx, got ${xlsxFiles.length}. Zip contents:\n${listing}`)
+      }
 
       const states = []
       const stateByName = new Map()
@@ -109,7 +113,7 @@ function main() {
       const national = {}
       const cells = {}
 
-      for (const file of files) {
+      for (const file of xlsxFiles) {
         const wb = XLSX.readFile(file, { cellDates: false })
         const sheet = wb.Sheets[wb.SheetNames[0]]
         const rows = XLSX.utils.sheet_to_json(sheet, { defval: null })
