@@ -5,7 +5,6 @@ import AdSlot from '@/components/AdSlot'
 import { jsonLdScript, breadcrumbLd } from '@/lib/jsonld'
 import { BASE, emp, hourly, money, vsNational } from '@/lib/site'
 import {
-  allOccupations,
   allStates,
   nationalStats,
   occupationBySlug,
@@ -13,14 +12,21 @@ import {
   stateBySlug,
   stateStats,
   topOccupationsInState,
+  topOccupationsNationally,
 } from '@/lib/bls'
 
-/** 长尾矩阵主力页:"X salary in California"。generateStaticParams 展开全部 occupation × state 已发布组合。 */
+/** 长尾矩阵主力页:"X salary in California"。
+ *  预渲染只做头部(全国就业量 Top 120 职业 × 全部州 ≈ 6.5k 页)——45k 全量在 Vercel 单 worker
+ *  构建下 generateStaticParams 递归克隆会栈溢出,且新域名冷启动全量预渲染无意义;
+ *  其余组合走 ISR 按需渲染 + 86400s 缓存,对访客与 SEO 等价。 */
 export const revalidate = 86400
+export const dynamicParams = true
+
+const PRERENDER_TOP_OCCUPATIONS = 120
 
 export function generateStaticParams() {
   const out: Array<{ slug: string; state: string }> = []
-  for (const occ of allOccupations()) {
+  for (const { occ } of topOccupationsNationally(PRERENDER_TOP_OCCUPATIONS)) {
     for (const st of allStates()) {
       out.push({ slug: occ.slug, state: st.slug })
     }
