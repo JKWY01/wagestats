@@ -45,6 +45,18 @@ jobs:
           git commit -m "sync: BLS OES data [skip ci]"
           git push
 
+      - name: IndexNow ping (optional)
+        env:
+          INDEXNOW_KEY: ${{ secrets.INDEXNOW_KEY }}
+          SITE_URL: ${{ secrets.SITE_URL }}
+        if: ${{ env.SITE_URL != '' }}
+        run: |
+          if [ -z "$INDEXNOW_KEY" ]; then echo "no indexnow key, skip"; exit 0; fi
+          for path in "" "/occupations" "/states" "/rankings/highest-protein-foods" "/occupation/registered-nurses/california"; do
+            curl -s -o /dev/null -w "indexnow $path -> %{http_code}\n" \
+              "https://api.indexnow.org/indexnow?url=${SITE_URL}${path}&key=${INDEXNOW_KEY}"
+          done
+
       - name: Alert on failure
         if: failure()
         env:
