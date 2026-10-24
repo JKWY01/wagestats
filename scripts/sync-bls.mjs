@@ -102,7 +102,7 @@ function pickStats(r) {
     aMean: num(r.A_MEAN),
     aP10: num(r.A_PCT10),
     aP25: num(r.A_PCT25),
-    aP50: num(r.A_PCT50),
+    aP50: num(r.A_MEDIAN),
     aP75: num(r.A_PCT75),
     aP90: num(r.A_PCT90),
     lq: num(r.LOC_QUOTIENT),
@@ -140,10 +140,10 @@ async function main() {
     return occBySoc.get(soc)
   }
 
-  // 全国文件:OCC_GROUP=detailed 的行即全国口径
+  // 全国文件:O_GROUP=detailed 的行即全国口径
   for (const r of readRows(natWb.xlsxPath)) {
     const soc = String(r.OCC_CODE ?? '').trim()
-    if (String(r.OCC_GROUP ?? '').trim() !== 'detailed' || !soc.includes('-')) continue
+    if (String(r.O_GROUP ?? '').trim() !== 'detailed' || !soc.includes('-')) continue
     ensureOcc(soc, r.OCC_TITLE)
     national[soc] = pickStats(r)
   }
@@ -151,7 +151,7 @@ async function main() {
   // 州文件:AREA 两位 FIPS 的行即州口径(排除都会区/非都会区行)
   for (const r of readRows(stateWb.xlsxPath)) {
     const soc = String(r.OCC_CODE ?? '').trim()
-    if (String(r.OCC_GROUP ?? '').trim() !== 'detailed' || !soc.includes('-')) continue
+    if (String(r.O_GROUP ?? '').trim() !== 'detailed' || !soc.includes('-')) continue
     const area = String(r.AREA_TITLE ?? '').trim()
     const areaCode = String(r.AREA ?? '').trim()
     if (US_NAMES.has(area) || !/^\d{2}$/.test(areaCode)) continue
