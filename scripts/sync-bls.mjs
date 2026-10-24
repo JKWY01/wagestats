@@ -173,8 +173,14 @@ async function main() {
   for (const code of Object.keys(cells)) cellCount += Object.keys(cells[code]).length
   const natCount = Object.keys(national).length
   if (occupations.length < 500 || states.length < 50 || cellCount < 10_000 || natCount < 500) {
+    const natSample = readRows(natWb.xlsxPath)[0] ?? {}
+    const stSample = readRows(stateWb.xlsxPath)[0] ?? {}
     throw new Error(
-      `parse sanity failed: occ=${occupations.length} states=${states.length} cells=${cellCount} nat=${natCount}`,
+      `parse sanity failed: occ=${occupations.length} states=${states.length} cells=${cellCount} nat=${natCount}\n` +
+        `nat headers: ${JSON.stringify(Object.keys(natSample))}\n` +
+        `nat row0: ${JSON.stringify(natSample).slice(0, 400)}\n` +
+        `state headers: ${JSON.stringify(Object.keys(stSample))}\n` +
+        `state row0: ${JSON.stringify(stSample).slice(0, 400)}`,
     )
   }
   const slugs = new Map()
