@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 /**
- * BLS OES(职业就业与工资统计)州级数据同步。
+ * BLS OES(职业就业与工资统计)数据同步。
  *
  *   源  U.S. Bureau of Labor Statistics — Occupational Employment and Wage Statistics
- *        May 2025 州级数据包(zip,内含每州一个 XLSX + 全国文件)。
- *        BLS 屏蔽大量非浏览器/数据中心 IP,本地常 403 —— 本脚本设计为在 GitHub Actions 上跑
- *        (GitHub 出口可达),数据落仓库,站点读路径零外呼。
+ *        州级包 oesm{YY}st.zip(单个合并工作簿 state_M{YYYY}_dl.xlsx,全部州)+ 全国包 oesm{YY}nat.zip。
+ *        BLS 对非浏览器/数据中心出口一律 403,故下载链为:直连 BLS → Wayback Machine 原始字节快照
+ *        (web.archive.org 的 id_ 模式返回与 BLS 完全相同的字节,来源如实标注)。
  *
- *   纪律  与 AnswerToday 同一套:数字要么来自 BLS 原表,要么缺失(null),绝不推算/编造。
- *        '#'(BLS 对超高工资的抑制标记)与 '*' 同样存 null,页面如实显示 "not published"。
- *        全国口径只取 BLS 全国文件的行,不用州数据加总伪造(那不是 OES 的估计方法)。
+ *   纪律  数字要么来自 BLS 原表,要么缺失(null),绝不推算/编造。
+ *        '#'(超高工资抑制)与 '*'(低样本)标记存 null,页面显示 "not published"。
+ *        全国口径只取 BLS 全国文件,不用州数据加总伪造。
  *
  * 运行:`node scripts/sync-bls.mjs`。幂等:数据本体无变化不写文件。
  */
@@ -24,55 +24,56 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const DATA_PATH = join(ROOT, 'data', 'bls-oes.json')
 const TMP = join(ROOT, '.bls-tmp')
 
-/** 下载候选(直连优先,Wayback 镜像兜底——BLS 对大量非浏览器出口一律 403)。
- *  Wayback 的 id_ 后缀返回原始字节(无存档横幅),数据本体与 BLS 完全一致,来源如实标注。 */
 const RELEASES = [
-  { release: 'May 2025', file: 'oesm25st.zip' },
-  { release: 'May 2024', file: 'oesm24st.zip' },
+  { release: 'May 2025', yy: '25' },
+  { release: 'May 2024', yy: '24' },
 ]
-
-function zipCandidates() {
-  const out = []
-  if (process.env.BLS_ZIP_URL) out.push({ url: process.env.BLS_ZIP_URL, release: 'custom' })
-  for (const { release, file } of RELEASES) {
-    out.push({ url: `https://www.bls.gov/oes/special-requests/${file}`, release })
-    out.push({ url: `https://web.archive.org/web/2026id_/https://www.bls.gov/oes/special-requests/${file}`, release })
-  }
-  return out
-}
 
 const UA =
   'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
 
-async function downloadZip() {
-  const zipPath = join(TMP, 'oes-state.zip')
-  for (const cand of zipCandidates()) {
-    try {
-      const res = await fetch(cand.url, {
-        headers: { 'User-Agent': UA, Accept: '*/*', Referer: 'https://www.bls.gov/oes/' },
-        redirect: 'follow',
-        signal: AbortSignal.timeout(180_000),
-      })
-      if (!res.ok) {
-        console.log(`[sync-bls] ${cand.url} → HTTP ${res.status}`)
-        continue
+/** 下载一个 BLS zip(直连 + Wayback 兜底),返回解压出的 xlsx 路径。 */
+async function fetchWorkbook(kind /* 'st' | 'nat' */) {
+  for (const { release, yy } of RELEASES) {
+    const file = `oesm${yy}${kind}.zip`
+    for (const url of [
+      `https://www.bls.gov/oes/special-requests/${file}`,
+      `https://web.archive.org/web/2026id_/https://www.bls.gov/oes/special-requests/${file}`,
+    ]) {
+      try {
+        const res = await fetch(url, {
+          headers: { 'User-Agent': UA, Accept: '*/*', Referer: 'https://www.bls.gov/oes/' },
+          redirect: 'follow',
+          signal: AbortSignal.timeout(240_000),
+        })
+        if (!res.ok) {
+          console.log(`[sync-bls] ${url} → HTTP ${res.status}`)
+          continue
+        }
+        const buf = Buffer.from(await res.arrayBuffer())
+        if (buf.length < 50_000 || !buf.subarray(0, 2).equals(Buffer.from('PK'))) {
+          console.log(`[sync-bls] ${url} → not a zip (${buf.length}B)`)
+          continue
+        }
+        const zipPath = join(TMP, file)
+        writeFileSync(zipPath, buf)
+        execFileSync('unzip', ['-o', zipPath, '-d', join(TMP, kind)], { stdio: 'pipe' })
+        const xlsxPath = execFileSync('find', [join(TMP, kind), '-name', '*.xlsx'], { encoding: 'utf8' })
+          .split('\n')
+          .map((f) => f.trim())
+          .filter(Boolean)[0]
+        if (!xlsxPath) throw new Error(`${file}: no xlsx inside`)
+        console.log(`[sync-bls] ${file} OK (${(buf.length / 1e6).toFixed(1)}MB, ${release})`)
+        return { xlsxPath, release }
+      } catch (err) {
+        console.log(`[sync-bls] ${url} → ${err.message}`)
       }
-      const buf = Buffer.from(await res.arrayBuffer())
-      if (buf.length < 100_000 || !buf.subarray(0, 2).equals(Buffer.from('PK'))) {
-        console.log(`[sync-bls] ${cand.url} → not a zip (${buf.length}B)`)
-        continue
-      }
-      writeFileSync(zipPath, buf)
-      console.log(`[sync-bls] downloaded ${cand.url} (${(buf.length / 1e6).toFixed(1)}MB, ${cand.release})`)
-      return { zipPath, release: cand.release }
-    } catch (err) {
-      console.log(`[sync-bls] ${cand.url} → ${err.message}`)
     }
   }
-  throw new Error('all BLS zip candidates failed (direct + Wayback)')
+  throw new Error(`failed to fetch oesm??${kind}.zip (direct + Wayback)`)
 }
 
-/** '#'/'*' 等 BLS 标记 → null;数字字段转 number;纯文本字段留字符串。 */
+/** '#'/'*' 等 BLS 标记 → null。 */
 function num(v) {
   if (v === null || v === undefined) return null
   const s = String(v).trim()
@@ -91,118 +92,6 @@ function slugify(text) {
     .replace(/^-+|-+$/g, '')
 }
 
-function main() {
-  mkdirSync(TMP, { recursive: true })
-  downloadZip()
-    .then(({ zipPath, release }) => {
-      execFileSync('unzip', ['-o', zipPath, '-d', TMP], { stdio: 'pipe' })
-      const files = execFileSync('find', [TMP, '-type', 'f'], { encoding: 'utf8' })
-        .split('\n')
-        .map((f) => f.trim())
-        .filter(Boolean)
-      const xlsxFiles = files.filter((f) => /\.xlsx$/i.test(f))
-      if (xlsxFiles.length < 40) {
-        const listing = files.slice(0, 30).join('\n')
-        throw new Error(`expected 50+ state xlsx, got ${xlsxFiles.length}. Zip contents:\n${listing}`)
-      }
-
-      const states = []
-      const stateByName = new Map()
-      const occupations = []
-      const occBySoc = new Map()
-      const national = {}
-      const cells = {}
-
-      for (const file of xlsxFiles) {
-        const wb = XLSX.readFile(file, { cellDates: false })
-        const sheet = wb.Sheets[wb.SheetNames[0]]
-        const rows = XLSX.utils.sheet_to_json(sheet, { defval: null })
-        for (const r of rows) {
-          const area = String(r.AREA_TITLE ?? '').trim()
-          const soc = String(r.OCC_CODE ?? '').trim()
-          const group = String(r.OCC_GROUP ?? '').trim() // total|major|detailed
-          if (group !== 'detailed' || !soc || !soc.includes('-')) continue
-
-          if (US_NAMES.has(area)) {
-            national[soc] = pickStats(r)
-            continue
-          }
-          // 州级行:AREA 是两位 FIPS,AREA_TITLE 是州名(排除都会区/非都会区行)
-          const areaCode = String(r.AREA ?? '').trim()
-          if (areaCode.length !== 2 || !/^\d{2}$/.test(areaCode)) continue
-
-          if (!stateByName.has(area)) {
-            const st = { code: r.PRIM_STATE ?? areaCode, name: area, slug: slugify(area) }
-            stateByName.set(area, st)
-            states.push(st)
-            cells[st.code] = {}
-          }
-          const st = stateByName.get(area)
-          const stats = pickStats(r)
-          if (stats.emp === null && stats.aMean === null && stats.hMean === null) continue
-          cells[st.code][soc] = stats
-
-          if (!occBySoc.has(soc)) {
-            const occ = { soc, slug: slugify(r.OCC_TITLE), title: String(r.OCC_TITLE).trim() }
-            occBySoc.set(soc, occ)
-            occupations.push(occ)
-          }
-        }
-      }
-
-      const occCount = occupations.length
-      let cellCount = 0
-      for (const st of Object.keys(cells)) cellCount += Object.keys(cells[st]).length
-      if (occCount < 500 || states.length < 50 || cellCount < 10_000) {
-        throw new Error(`parse sanity failed: occ=${occCount} states=${states.length} cells=${cellCount}`)
-      }
-      // slug 冲突检查(职业名 slug 必须唯一,否则路由会互相覆盖)
-      const slugs = new Map()
-      for (const o of occupations) {
-        if (slugs.has(o.slug)) throw new Error(`occupation slug collision: ${o.slug} (${o.soc} vs ${slugs.get(o.slug)})`)
-        slugs.set(o.slug, o.soc)
-      }
-
-      const payload = {
-        meta: {
-          source: 'U.S. Bureau of Labor Statistics — Occupational Employment and Wage Statistics',
-          release,
-          fetched_at: new Date().toISOString(),
-          occupations: occCount,
-          states: states.length,
-          cells: cellCount,
-        },
-        states: states.sort((a, b) => a.name.localeCompare(b.name)),
-        occupations: occupations.sort((a, b) => a.title.localeCompare(b.title)),
-        national,
-        cells,
-      }
-
-      const prev = existsSync(DATA_PATH)
-        ? JSON.parse(readFileSync(DATA_PATH, 'utf8'))
-        : null
-      const sameData =
-        prev &&
-        JSON.stringify(prev.states) === JSON.stringify(payload.states) &&
-        JSON.stringify(prev.occupations) === JSON.stringify(payload.occupations) &&
-        JSON.stringify(prev.national) === JSON.stringify(payload.national) &&
-        JSON.stringify(prev.cells) === JSON.stringify(payload.cells)
-      if (sameData) {
-        console.log(`[sync-bls] occ=${occCount} states=${states.length} cells=${cellCount} — no change, skip write`)
-        return
-      }
-
-      mkdirSync(join(ROOT, 'data'), { recursive: true })
-      writeFileSync(DATA_PATH, JSON.stringify(payload) + '\n')
-      console.log(`[sync-bls] occ=${occCount} states=${states.length} cells=${cellCount} — written`)
-    })
-    .catch((err) => {
-      console.error(`[sync-bls] failed: ${err.message}`)
-      process.exit(1)
-    })
-    .finally(() => rmSync(TMP, { recursive: true, force: true }))
-}
-
 function pickStats(r) {
   return {
     emp: num(r.TOT_EMP),
@@ -217,4 +106,115 @@ function pickStats(r) {
   }
 }
 
+function readRows(xlsxPath) {
+  const wb = XLSX.readFile(xlsxPath, { cellDates: false })
+  const sheet = wb.Sheets[wb.SheetNames[0]]
+  return XLSX.utils.sheet_to_json(sheet, { defval: null })
+}
+
+async function main() {
+  mkdirSync(TMP, { recursive: true })
+
+  const stateWb = await fetchWorkbook('st')
+  const natWb = await fetchWorkbook('nat')
+  if (stateWb.release !== natWb.release) {
+    throw new Error(`release mismatch: state=${stateWb.release} nat=${natWb.release}`)
+  }
+
+  const states = []
+  const stateByName = new Map()
+  const occupations = []
+  const occBySoc = new Map()
+  const national = {}
+  const cells = {}
+
+  function ensureOcc(soc, title) {
+    if (!occBySoc.has(soc)) {
+      const occ = { soc, slug: slugify(title), title: String(title).trim() }
+      occBySoc.set(soc, occ)
+      occupations.push(occ)
+    }
+    return occBySoc.get(soc)
+  }
+
+  // 全国文件:OCC_GROUP=detailed 的行即全国口径
+  for (const r of readRows(natWb.xlsxPath)) {
+    const soc = String(r.OCC_CODE ?? '').trim()
+    if (String(r.OCC_GROUP ?? '').trim() !== 'detailed' || !soc.includes('-')) continue
+    ensureOcc(soc, r.OCC_TITLE)
+    national[soc] = pickStats(r)
+  }
+
+  // 州文件:AREA 两位 FIPS 的行即州口径(排除都会区/非都会区行)
+  for (const r of readRows(stateWb.xlsxPath)) {
+    const soc = String(r.OCC_CODE ?? '').trim()
+    if (String(r.OCC_GROUP ?? '').trim() !== 'detailed' || !soc.includes('-')) continue
+    const area = String(r.AREA_TITLE ?? '').trim()
+    const areaCode = String(r.AREA ?? '').trim()
+    if (US_NAMES.has(area) || !/^\d{2}$/.test(areaCode)) continue
+    ensureOcc(soc, r.OCC_TITLE)
+
+    if (!stateByName.has(area)) {
+      const st = { code: r.PRIM_STATE ?? areaCode, name: area, slug: slugify(area) }
+      stateByName.set(area, st)
+      states.push(st)
+      cells[st.code] = {}
+    }
+    const st = stateByName.get(area)
+    const stats = pickStats(r)
+    if (stats.emp === null && stats.aMean === null && stats.hMean === null) continue
+    cells[st.code][soc] = stats
+  }
+
+  let cellCount = 0
+  for (const code of Object.keys(cells)) cellCount += Object.keys(cells[code]).length
+  const natCount = Object.keys(national).length
+  if (occupations.length < 500 || states.length < 50 || cellCount < 10_000 || natCount < 500) {
+    throw new Error(
+      `parse sanity failed: occ=${occupations.length} states=${states.length} cells=${cellCount} nat=${natCount}`,
+    )
+  }
+  const slugs = new Map()
+  for (const o of occupations) {
+    if (slugs.has(o.slug)) throw new Error(`occupation slug collision: ${o.slug} (${o.soc} vs ${slugs.get(o.slug)})`)
+    slugs.set(o.slug, o.soc)
+  }
+
+  const payload = {
+    meta: {
+      source: 'U.S. Bureau of Labor Statistics — Occupational Employment and Wage Statistics',
+      release: stateWb.release,
+      fetched_at: new Date().toISOString(),
+      occupations: occupations.length,
+      states: states.length,
+      cells: cellCount,
+    },
+    states: states.sort((a, b) => a.name.localeCompare(b.name)),
+    occupations: occupations.sort((a, b) => a.title.localeCompare(b.title)),
+    national,
+    cells,
+  }
+
+  const prev = existsSync(DATA_PATH) ? JSON.parse(readFileSync(DATA_PATH, 'utf8')) : null
+  const sameData =
+    prev &&
+    JSON.stringify(prev.states) === JSON.stringify(payload.states) &&
+    JSON.stringify(prev.occupations) === JSON.stringify(payload.occupations) &&
+    JSON.stringify(prev.national) === JSON.stringify(payload.national) &&
+    JSON.stringify(prev.cells) === JSON.stringify(payload.cells)
+  if (sameData) {
+    console.log(`[sync-bls] occ=${occupations.length} states=${states.length} cells=${cellCount} — no change, skip write`)
+    return
+  }
+
+  mkdirSync(join(ROOT, 'data'), { recursive: true })
+  writeFileSync(DATA_PATH, JSON.stringify(payload) + '\n')
+  console.log(`[sync-bls] occ=${occupations.length} states=${states.length} cells=${cellCount} — written`)
+}
+
 main()
+  .catch((err) => {
+    console.error(`[sync-bls] failed: ${err.message}`)
+    process.exitCode = 1
+  })
+  .finally(() => rmSync(TMP, { recursive: true, force: true }))
