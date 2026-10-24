@@ -27,8 +27,8 @@ const TMP = join(ROOT, '.bls-tmp')
 /** 下载候选(直连优先,Wayback 镜像兜底——BLS 对大量非浏览器出口一律 403)。
  *  Wayback 的 id_ 后缀返回原始字节(无存档横幅),数据本体与 BLS 完全一致,来源如实标注。 */
 const RELEASES = [
-  { release: 'May 2025', file: 'oesm25state.zip' },
-  { release: 'May 2024', file: 'oesm24state.zip' },
+  { release: 'May 2025', file: 'oesm25st.zip' },
+  { release: 'May 2024', file: 'oesm24st.zip' },
 ]
 
 function zipCandidates() {
