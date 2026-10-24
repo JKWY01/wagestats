@@ -5,7 +5,8 @@ name: BLS data sync
 # 首次引导:手动 workflow_dispatch 触发一次,把全量数据落进仓库。
 on:
   schedule:
-    - cron: '30 6 * * 1'
+    - cron: '30 6 * * 1' # 周一:BLS 数据同步(年更数据,周检查)
+    - cron: '40 9 * * *' # 每天:线上体检
   workflow_dispatch:
 
 permissions:
@@ -56,6 +57,34 @@ jobs:
               --body "自动告警:BLS 数据同步失败,站点放养中需要人工查看。
           运行记录:${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           修复后请关闭本 issue。连续失败时本告警不会重复开(去重逻辑见 workflow)。" || echo "issue create failed (non-fatal)"
+          else
+            echo "alert issue already open, skip duplicate"
+          fi
+
+  healthcheck:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.schedule == '40 9 * * *' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Health check live site
+        run: node scripts/healthcheck.mjs
+        env:
+          SITE_URL: ${{ secrets.SITE_URL }}
+
+      - name: Alert on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          OPEN=$(gh issue list --search "🚨 in:title" --state open --json number --jq length)
+          if [ "${OPEN:-0}" = "0" ]; then
+            gh issue create \
+              --title "🚨 healthcheck failed — $(date -u '+%F %T') UTC" \
+              --body "自动告警:线上体检未通过,站点放养中需要人工查看。
+          运行记录:${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          修复后请关闭本 issue。" || echo "issue create failed (non-fatal)"
           else
             echo "alert issue already open, skip duplicate"
           fi
