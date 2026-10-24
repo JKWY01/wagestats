@@ -226,4 +226,15 @@ main()
     console.error(`[sync-bls] failed: ${err.message}`)
     process.exitCode = 1
   })
-  .finally(() => rmSync(TMP, { recursive: true, force: true }))
+  .finally(() => {
+    // 解压出的 xlsx 带只读位,rmSync 会 EACCES;清理失败不能拖垮同步结果
+    try {
+      rmSync(TMP, { recursive: true, force: true })
+    } catch {
+      try {
+        execFileSync('rm', ['-rf', TMP], { stdio: 'ignore' })
+      } catch {
+        /* 留给 runner 清理 */
+      }
+    }
+  })
