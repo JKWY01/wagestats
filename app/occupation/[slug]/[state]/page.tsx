@@ -19,7 +19,7 @@ import {
  *  预渲染只做头部(全国就业量 Top 120 职业 × 全部州 ≈ 6.5k 页)——45k 全量在 Vercel 单 worker
  *  构建下 generateStaticParams 递归克隆会栈溢出,且新域名冷启动全量预渲染无意义;
  *  其余组合走 ISR 按需渲染 + 86400s 缓存,对访客与 SEO 等价。 */
-export const revalidate = 86400
+export const revalidate = 604800
 export const dynamicParams = true
 
 const PRERENDER_TOP_OCCUPATIONS = 120

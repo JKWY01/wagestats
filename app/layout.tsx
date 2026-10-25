@@ -10,6 +10,7 @@ import './globals.css'
 const AD_CLIENT = process.env.NEXT_PUBLIC_ADSENSE_CLIENT
 
 export const metadata: Metadata = {
+  openGraph: { images: ["/og.png"] },
   metadataBase: new URL(BASE),
   title: {
     default: `${SITE_NAME} — ${SITE_TAGLINE}`,
