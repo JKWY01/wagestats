@@ -4,6 +4,7 @@ import AdSlot from '@/components/AdSlot'
 import { breadcrumbLd } from '@/lib/jsonld'
 import { BASE, money } from '@/lib/site'
 import { allOccupations, nationalStats } from '@/lib/bls'
+import FilterBox from '@/components/FilterBox'
 
 /** 职业目录:全部职业按首字母分组。"list of occupations and salaries" 意图 + 内链枢纽。 */
 export const revalidate = 86400
@@ -31,7 +32,7 @@ export default function OccupationsPage() {
   ])
 
   return (
-    <div>
+    <div id="occ-groups">
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: breadcrumb }} />
 
       <p className="text-[13px] font-semibold uppercase tracking-widest text-brand">Directory</p>
@@ -45,6 +46,7 @@ export default function OccupationsPage() {
 
       <AdSlot slot="occupations-top" />
 
+      <FilterBox targetId="occ-groups" placeholder="Filter occupations…" />
       <nav className="mt-6 flex flex-wrap gap-2">
         {letters.map((l) => (
           <a

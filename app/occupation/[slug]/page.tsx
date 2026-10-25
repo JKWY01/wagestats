@@ -159,7 +159,7 @@ export default async function OccupationPage({
           Ranked by mean annual wage. Each row links to the full state page.
         </p>
         <div className="mt-4 overflow-x-auto rounded-xl border border-ink/10 bg-white">
-          <table className="w-full text-[13.5px]">
+          <table className="w-full text-[13.5px] sticky-head">
             <thead>
               <tr className="border-b border-ink/10 text-left text-[12px] uppercase tracking-wider text-ink/45">
                 <th className="px-4 py-2.5">#</th>
